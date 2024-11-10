@@ -55,6 +55,8 @@ def parse_visualization_info(interpretation, query_text):
     if not interpretation:
         print("Interpretation is None or empty.")
         return None
+    else:
+        print(f"Interpretation: {interpretation}")
 
     try:
         lines = interpretation.split("\n")

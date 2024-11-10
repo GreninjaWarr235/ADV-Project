@@ -21,6 +21,8 @@ def load_visualization_info(vis_file_path):
     return None
 
 # Streamlit app
+st.set_page_config(page_title="Visualizer")
+
 st.title("Dynamic Data Visualization")
 
 temp_file_path = os.getenv("TEMP_FILE_PATH")
