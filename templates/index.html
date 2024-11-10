@@ -27,6 +27,14 @@
         </span>
     </button>
 
+    <!-- Spinner overlay with Bootstrap utility classes -->
+    <div id="spinner" class="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center d-none" style="background-color: rgba(0, 0, 0, 0.5); z-index: 1050;">
+        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+  
+    <!-- Main Content -->
     <div class="container mt-5">
         <!-- Page Header -->
         <h1 class="text-center mb-4">Querify</h1>
@@ -119,6 +127,10 @@
             e.preventDefault();
             const queryText = queryForm.query.value;
 
+            // Show spinner
+            const spinner = document.getElementById('spinner');
+            spinner.classList.toggle("d-none");
+
             const response = await fetch(queryForm.action, {
                 method: 'POST',
                 headers: {
@@ -130,6 +142,10 @@
                 })
             });
             const data = await response.json();
+
+            // Hide spinner
+            spinner.classList.toggle("d-none");
+            
             responseDiv.style.display = "block";
             if (response.ok) {
                 responseDiv.className = "alert alert-success";
