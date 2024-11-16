@@ -7,7 +7,7 @@ load_dotenv()
 
 import openai
 
-openai.api_key = 'pk-WDZEqrNUedoRmEkKMbiEAtfhuaztWEuRitcTizvAagoIWVoY'
+openai.api_key = os.getenv("COSMOSRP_API_KEY")
 openai.base_url = "https://api.pawan.krd/cosmosrp/v1"
 
 def interpret_query(df, query_text):
