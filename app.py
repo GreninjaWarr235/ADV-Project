@@ -1,128 +1,156 @@
 import os
-import pickle
-import subprocess
-from flask import Flask, request, jsonify, render_template, redirect, url_for
-from utils import load_dataframe_from_file, detect_column_types, interpret_query, parse_visualization_info
-from tempfile import NamedTemporaryFile
+from dotenv import load_dotenv
+import openai
+import streamlit as st
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
 
-app = Flask(__name__)
-app.secret_key = 'verysecretkey'
+load_dotenv()
 
-UPLOAD_FOLDER = 'uploads'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+openai.api_key = os.getenv("COSMOSRP_API_KEY")
+openai.base_url = "https://api.pawan.krd/cosmosrp/v1"
 
-temp_file_path_global = None
-uploaded_file_path_global = None  
-vis_file_path_global = None  
-
-@app.route('/upload', methods=['POST'])
-def upload_file():
-    global uploaded_file_path_global
-    if 'file' not in request.files:
-        return jsonify({"error": "No file part in the request."}), 400
-
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({"error": "No selected file."}), 400
-
-    # Save the uploaded file
-    file_path = os.path.join(UPLOAD_FOLDER, file.filename)
-    file.save(file_path)
-    uploaded_file_path_global = file_path
-
-    try:
-        df = load_dataframe_from_file(file_path)
-        column_types = detect_column_types(df)
-
-        # Save the DataFrame to a temporary file
-        with NamedTemporaryFile(delete=False, suffix='.pkl') as temp_file:
-            pickle.dump(df, temp_file)
-            temp_file_path = temp_file.name
-
-        return jsonify({
-            "message": "File uploaded successfully, now enter your query.",
-            "temp_file": temp_file_path,
-            "columns": list(df.columns),
-            "column_types": column_types
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/')
-def home():
-    return render_template('index.html')
-
-@app.route('/query', methods=['POST'])
-def query():
-    global temp_file_path_global, vis_file_path_global
-    if request.content_type != 'application/json':
-        return jsonify({"error": "Unsupported Media Type. Please send JSON data."}), 415
-
-    try:
-        data = request.json
-        if data is None:
-            return jsonify({"error": "Invalid JSON format."}), 400
-
-        query_text = data.get("query")
-        temp_file_path = data.get("temp_file")
-        temp_file_path_global = temp_file_path
-
-        with open(temp_file_path, 'rb') as f:
-            df = pickle.load(f)
-
-        # Interpret the user's query
-        interpretation = interpret_query(df, query_text)
-        if interpretation is None:
-            return jsonify({"error": "Failed to interpret query."}), 500
-
-        # Parse visualization information
-        visualization_info = parse_visualization_info(interpretation, query_text)
-        if visualization_info is None:
-            return jsonify({"error": "Failed to parse visualization information."}), 500
-
-        # Save visualization_info to a temporary file
-        with NamedTemporaryFile(delete=False, suffix='.pkl') as vis_file:
-            pickle.dump(visualization_info, vis_file)
-            vis_file_path = vis_file.name
-            vis_file_path_global = vis_file_path 
-
-        os.environ["TEMP_FILE_PATH"] = temp_file_path
-        os.environ["VISUALIZATION_INFO_PATH"] = vis_file_path
-
-        subprocess.Popen(["streamlit", "run", "streamlit_app.py"])
-
-        return jsonify({
-            "message": "Query processed successfully, now showing your visualization...",
-            "visualization_info": visualization_info
-        })
+def interpret_query(df, query_text):
+    valid_columns = df.columns.tolist()
     
+    prompt = f"""
+    You are a data visualization assistant. Given the following user query: '{query_text}', and the columns of the dataset: '{valid_columns}', please determine the type of visualization needed. You must provide the response in the following exact format:
+    1. Visualization type: [Type of visualization: Bar Chart, Line Chart, Pie Chart, Boxplot, Violin Plot, Scatter Plot]
+    2. X-axis: [Exact column name (case-sensitive) as in the dataset]
+    3. Y-axis: [Exact column name (case-sensitive) as in the dataset]
+    4. Additional notes: [Any extra information, if applicable]
+    
+    Important guidelines:
+    - If only one column is required for the visualization (in the case of a pie chart), mention the column name for value counts in the X-axis and you can leave the Y-axis field empty (DO NOT WRITE 'Count').
+    - The response should include only the specified labels, and the values must not contain any punctuation or special characters.
+    - The exact column names (case-sensitive) must be used as they appear in the dataset—do not modify, alter or add any column names in any way, even if there are typos or inconsistencies in the query.
+    - The response must strictly follow the format provided without any deviations.
+    - You must ensure that the visualization type is appropriate for the query and the columns listed.
+    
+    Example Queries:
+    - 'How many males and females are there in the data?'
+    - 'Is gender affecting marks in exams?'
+    - 'What is the trend of sales over the years?'
+    - 'Show the distribution of exam scores.'
+    - 'What percentage of the population belongs to each age group?'
+    - 'Compare the performance of students across different subjects.'
+    
+    Please ensure the response matches the format given below, and avoid any other types of outputs.
+    
+    Response Format Example:
+    - Visualization type: [Pie Chart]
+    - X-axis: [Gender]
+    - Y-axis: [""]
+    - Additional notes: [None]
+    """
+
+    try:
+        response = openai.chat.completions.create(
+            model="cosmosrp",
+            messages=[
+                {"role": "system", "content": "You are a data visualization assistant."},
+                {"role": "user", "content": prompt}
+            ],
+        )
+        if response and hasattr(response, "choices") and len(response.choices) > 0:
+            interpretation = response.choices[0].message.content
+            print(f"Interpretation: {interpretation}")
+            if interpretation:
+                return interpretation
+        else:
+            print("No valid content in response.")
     except Exception as e:
-        print(f"Error processing query: {e}")
-        return jsonify({"error": str(e)}), 500
+        return f"Error interpreting the query: {e}"
 
-@app.route('/cleanup', methods=['POST'])
-def cleanup():
-    global temp_file_path_global, uploaded_file_path_global, vis_file_path_global
+def parse_visualization_info(interpretation):
+    if not interpretation:
+        return None
 
-    # Delete temporary DataFrame file
-    if temp_file_path_global and os.path.exists(temp_file_path_global):
-        os.remove(temp_file_path_global)
-        print(f"Temporary DataFrame file {temp_file_path_global} deleted successfully.")
-        temp_file_path_global = None
+    info = {}
+    try:
+        lines = interpretation.split("\n")
+        for line in lines:
+            if "Visualization type:" in line:
+                info["type"] = line.split(":")[1].strip()
+            elif "X-axis:" in line:
+                info["x_axis"] = line.split(":")[1].strip()
+            elif "Y-axis:" in line:
+                info["y_axis"] = line.split(":")[1].strip()
+            elif "Additional notes:" in line:
+                info["notes"] = line.split(":")[1].strip()
+        return info
+    except Exception as e:
+        st.error(f"Error parsing visualization info: {e}")
+        return None
 
-    # Delete uploaded file
-    if uploaded_file_path_global and os.path.exists(uploaded_file_path_global):
-        os.remove(uploaded_file_path_global)
-        print(f"Uploaded file {uploaded_file_path_global} deleted successfully.")
-        uploaded_file_path_global = None
+def generate_visualization(df, vis_info):
+    vis_type = vis_info.get("type")
+    x_axis = vis_info.get("x_axis")
+    y_axis = vis_info.get("y_axis")
+    if not vis_type or not x_axis or (vis_type not in ["Pie Chart"] and not y_axis):
+        st.error("Incomplete visualization details from response.")
+        return
 
-    # Delete visualization info file
-    if vis_file_path_global and os.path.exists(vis_file_path_global):
-        os.remove(vis_file_path_global)
-        print(f"Visualization info file {vis_file_path_global} deleted successfully.")
-        vis_file_path_global = None
+    plt.figure(figsize=(10, 6))
+    try:
+        if vis_type.lower() == "bar chart":
+            sns.barplot(x=df[x_axis], y=df[y_axis])
+        elif vis_type.lower() == "line chart":
+            sns.lineplot(x=df[x_axis], y=df[y_axis])
+        elif vis_type.lower() == "pie chart":
+            df[x_axis].value_counts().plot.pie(autopct='%1.1f%%')
+        elif vis_type.lower() == "boxplot" or vis_type.lower() == "box plot":
+            sns.boxplot(x=df[x_axis], y=df[y_axis])
+        elif vis_type.lower() == "violin plot":
+            sns.violinplot(x=df[x_axis], y=df[y_axis])
+        elif vis_type.lower() == "scatter plot":
+            sns.scatterplot(x=df[x_axis], y=df[y_axis])
+        else:
+            st.error("Unsupported visualization type!")
+        st.pyplot(plt)
+    except Exception as e:
+        st.error(f"Error generating visualization: {e}")
 
-    return jsonify({"message": "Temporary and uploaded files cleaned up successfully."})
+st.title("Interactive Data Visualization Assistant")
 
-if __name__ == '__main__':
-    app.run(debug=True)
+# Step 1: Upload Dataset
+st.header("Step 1: Upload Your Dataset")
+uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
+
+if uploaded_file:
+    data = pd.read_csv(uploaded_file)
+    st.write("Preview of the Uploaded Dataset:")
+    st.dataframe(data)
+
+    # Step 2: Enter Query
+    st.header("Step 2: Enter Your Query for Visualization")
+    user_query = st.text_area("Enter your query (e.g., 'How many houses are without air conditioning?'):")
+
+    if st.button("Generate Visualization"):
+        if user_query.strip():
+            st.write("Processing query...")
+            
+            interpretation = interpret_query(data, user_query)
+            if interpretation:
+                st.subheader("Suggested Interpretation:")
+                st.write(interpretation)
+
+                vis_info = parse_visualization_info(interpretation)
+                if vis_info:
+                    st.subheader("Visualization Details:")
+                    st.json(vis_info)
+
+                    st.header("Step 3: Visualization Result")
+                    generate_visualization(data, vis_info)
+                else:
+                    st.error("Failed to parse visualization details.")
+            else:
+                st.error("Failed to interpret the query. Please try again.")
+        else:
+            st.warning("Please enter a query!")
+
+else:
+    st.info("Please upload a dataset to proceed.")
+
+    
