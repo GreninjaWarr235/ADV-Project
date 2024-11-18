@@ -13,20 +13,35 @@ openai.base_url = "https://api.pawan.krd/cosmosrp/v1"
 def interpret_query(df, query_text):
     valid_columns = df.columns.tolist()
     
-    prompt = f"You are a data visualization assistant. Given the following user query: '{query_text}', and the columns of the dataset: '{valid_columns}'" \
-         "determine the type of visualization needed. Provide the columns involved and the visualization type (like bar chart, box plot, line chart, pie chart, violin plot, area plot, scatter plot, spider chart).\n\n" \
-         "Example Queries:\n" \
-         "- 'How many males and females are there in the data?'\n" \
-         "- 'Is gender affecting marks in exams?'\n" \
-         "- 'What is the trend of sales over the years?'\n" \
-         "- 'Show the distribution of exam scores.'\n" \
-         "- 'What percentage of the population belongs to each age group?'\n" \
-         "- 'Compare the performance of students across different subjects.'\n\n" \
-         "Response format should be given as follows (please note that it shouldn't be anything other than this, the labels are as it is and the values do not include any punctuations or special characters, and the axes should use the exact column names as given in the dataframe without any modifications or changes):\n" \
-         "- Visualization type: [Type of visualization]\n" \
-         "- X-axis: [Exact column name (case sensitive) as in the dataframe]\n" \
-         "- Y-axis: [Exact column name (case sensitive) as in the dataframe]\n" \
-         "- Additional notes: [Any extra information, if applicable]"
+    prompt = f"""
+    You are a data visualization assistant. Given the following user query: '{query_text}', and the columns of the dataset: '{valid_columns}', please determine the type of visualization needed. You must provide the response in the following exact format:
+    1. Visualization type: [Type of visualization]
+    2. X-axis: [Exact column name (case-sensitive) as in the dataset]
+    3. Y-axis: [Exact column name (case-sensitive) as in the dataset]
+    4. Additional notes: [Any extra information, if applicable]
+    
+    Important guidelines:
+    - The response should include only the specified labels, and the values must not contain any punctuation or special characters.
+    - The exact column names (case-sensitive) must be used as they appear in the dataset—do not modify or alter the column names in any way, even if there are typos or inconsistencies in the query.
+    - The response must strictly follow the format provided without any deviations.
+    - You must ensure that the visualization type is appropriate for the query and the columns listed.
+    
+    Example Queries:
+    - 'How many males and females are there in the data?'
+    - 'Is gender affecting marks in exams?'
+    - 'What is the trend of sales over the years?'
+    - 'Show the distribution of exam scores.'
+    - 'What percentage of the population belongs to each age group?'
+    - 'Compare the performance of students across different subjects.'
+    
+    Please ensure the response matches the format given below, and avoid any other types of outputs.\n
+    
+    Response Format Example:
+    - Visualization type: [Bar chart]
+    - X-axis: [Gender]
+    - Y-axis: [Count]
+    - Additional notes: [None]
+    """
 
     try:
         response = openai.chat.completions.create(
